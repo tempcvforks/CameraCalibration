@@ -30,21 +30,25 @@ import numpy as np
 import cv2
 import logging
 import argparse
+import glob
+import numpy as np
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+
 
 if __name__ == '__main__':
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='Generate camera matrix and '
-                                     'distortion parameters from checkerboard '
+                                     'distortion parameters from chessboard '
                                      'images')
-    parser.add_argument('images', help='path to images')
-    parser.add_argument('pattern_x', metavar='X', default=9, type=int, 
+    parser.add_argument('--chessboard', help='path to images', default = os.path.join('sample', 'chessboard'))
+    parser.add_argument('--input', help='path to images', default = os.path.join('sample', 'images'))
+    parser.add_argument('--pattern_x', metavar='X', default=10, type=int,
                         help='pattern x')
-    parser.add_argument('pattern_y', metavar='Y', default=6, type=int, 
+    parser.add_argument('--pattern_y', metavar='Y', default=7, type=int,
                         help='pattern y')
-    parser.add_argument('--out', help='optional path for output')
+    parser.add_argument('--out', help='optional path for output', default='undistorted')
     parser.add_argument('--square_size', default=1.0)
 
     args=parser.parse_args()
@@ -52,14 +56,23 @@ if __name__ == '__main__':
     logging.debug(args)
 
     # get images into a list
-    extensions = ['jpg', 'JPG', 'png']
+    extensions = ['*jpg', '*JPG', '*jpeg', '*png']
 
-    if os.path.isdir(args.images):
-        img_names = [fn for fn in os.listdir(args.images)
-                     if any(fn.endswith(ext) for ext in extensions)]
-        proj_root = args.images
+    img_to_undist = []
+    # images to undistort
+    if os.path.isdir(args.input):
+        for ext in extensions:
+            img_to_undist += glob.glob(os.path.join(args.input, ext))
+            print(img_to_undist)
+
+    # chessboard images
+    img_names = []
+    if os.path.isdir(args.chessboard):
+        for ext in extensions:
+            img_names += glob.glob(os.path.join(args.chessboard, ext))
+        proj_root = args.chessboard # os.path.join(os.path.join(args.chessboard, '..'))
     else: 
-        logging.error("%s is not a directory" % args.images)
+        logging.error("%s is not a directory" % args.chessboard)
         exit()
 
     if not args.out:
@@ -80,11 +93,11 @@ if __name__ == '__main__':
     obj_points = []
     img_points = []
     h, w = 0, 0
-    img_names_undistort = []
     print('img: ', img_names)
     for fn in img_names:
         print('processing %s... ' % fn, end='')
-        img = cv2.imread(os.path.join(proj_root, fn), 0)
+        #img = cv2.imread(os.path.join(proj_root, fn), 0)
+        img = cv2.imread(fn, 0)
         if img is None:
             print("Failed to load", fn)
             continue
@@ -92,6 +105,7 @@ if __name__ == '__main__':
         h, w = img.shape[:2]
         found, corners = cv2.findChessboardCorners(img, pattern_size)
         if found:
+            print("ok...")
             term = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 30, 0.1)
             cv2.cornerSubPix(img, corners, (5, 5), (-1, -1), term)
 
@@ -102,7 +116,8 @@ if __name__ == '__main__':
             outfile = os.path.join(out, name + '_chess.png')
             cv2.imwrite(outfile, vis)
             if found:
-                img_names_undistort.append(outfile)
+                pass
+                #img_names_undistort.append(outfile)
 
         if not found:
             print('chessboard not found')
@@ -110,6 +125,12 @@ if __name__ == '__main__':
 
         img_points.append(corners.reshape(-1, 2))
         obj_points.append(pattern_points)
+
+        import pickle as pkl
+        with open('img.pkl', 'wb') as f:
+            pkl.dump(img_points, f)
+        with open('obj.pkl', 'wb') as f:
+            pkl.dump(obj_points, f)
 
         print('ok')
 
@@ -130,7 +151,7 @@ if __name__ == '__main__':
         np.savetxt(distf, dist_coefs.ravel(), fmt='%.12f')
 
     # undistort the image with the calibration
-    for img_found in img_names_undistort:
+    for img_found in img_to_undist:
         img = cv2.imread(img_found)
 
         h,  w = img.shape[:2]
@@ -140,10 +161,11 @@ if __name__ == '__main__':
 
         # crop and save the image
         x, y, w, h = roi
-        dst = dst[y:y+h, x:x+w]
+        #dst = dst[y:y+h, x:x+w] # only extracts a tiny rectangle of the undistorted image
         path, name, ext = splitfn(img_found)
         outfile = os.path.join(path, name + '_undistorted.png')
         cv2.imwrite(outfile, dst)
+        remove_artifacts(dst)
         print('Undistorted image written to: %s' % outfile)
 
     cv2.destroyAllWindows()
